@@ -1,0 +1,4 @@
+project_id = "cjcyulvgxrzgglxwfvcd"
+
+[db]
+migrations_path = "./supabase/migrations"
