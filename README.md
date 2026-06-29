@@ -106,3 +106,32 @@ Centralizar y automatizar el seguimiento de postulaciones laborales de forma sim
 ---
 
 Proyecto diseñado para uso personal con foco en simplicidad y eficiencia.
+
+# PATHWORK
+
+Aplicación para gestionar postulaciones laborales con Supabase.
+
+## Estructura del proyecto
+
+- src/: punto de entrada de la aplicación
+- public/: archivos estáticos
+- supabase/: configuración y migraciones de Supabase
+- docs/: documentación de API y endpoints
+
+## Supabase
+
+1. Configura tus variables de entorno con .env.
+2. Aplica la migración en Supabase:
+   - supabase db push
+3. Usa los endpoints REST de PostgREST:
+   - /rest/v1/jobs
+   - /rest/v1/applications
+
+## GitHub
+
+El repositorio remoto ya está conectado a:
+- https://github.com/MateoGarrido13/PATHWORK.git
+
+## Siguiente paso recomendado
+
+Conectar el proyecto a Vercel y preparar el frontend real para consumir estos endpoints.

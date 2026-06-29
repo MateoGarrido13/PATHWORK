@@ -1,0 +1,356 @@
+# Testing Guide — Scraping
+
+## Setup
+
+### 1. Deployer la Edge Function de Testing
+
+```bash
+supabase functions deploy test-scraping
+```
+
+Obtendrás una URL como:
+```
+https://xxxxx.supabase.co/functions/v1/test-scraping
+```
+
+### 2. Variables de Entorno (React)
+
+En `.env.local`:
+```
+VITE_SUPABASE_FUNCTION_URL=https://xxxxx.supabase.co/functions/v1
+```
+
+---
+
+## Opción A: Testing desde React (UI)
+
+### 1. Copiar componente
+
+```bash
+src/components/ScrapingTestPanel.tsx
+```
+
+### 2. Agregar a una ruta (ej: `/admin/test-scraping`)
+
+```typescript
+import { ScrapingTestPanel } from '@/components/ScrapingTestPanel';
+
+export function TestScrapingPage() {
+  return <ScrapingTestPanel />;
+}
+```
+
+### 3. Usar
+
+- Accedé a `/admin/test-scraping`
+- Pegá una URL
+- Clickeá "Testear Scraping"
+- Verás breakdown por tier, timing, etc.
+
+**Ventajas:**
+- UI visual e intuitiva
+- Ver logs de BD en tiempo real
+- Historial en la BD
+
+---
+
+## Opción B: Testing desde Terminal (cURL)
+
+### 1. Editar script
+
+```bash
+# Reemplazar SUPABASE_URL
+sed -i 's|https://xxxxx.supabase.co|TU_URL_AQUI|g' test-scraping.sh
+chmod +x test-scraping.sh
+```
+
+### 2. Ejecutar tests predefinidos
+
+```bash
+./test-scraping.sh
+```
+
+Salida esperada:
+```
+=== TEST 1: Computrabajo (JSON-LD) ===
+URL: https://www.computrabajo.com.ar/busquedas/Python-Developer-Buenos-Aires
+
+✓ Scraping completado
+Fuente detectada: computrabajo
+Tiempo total: 2341ms
+JSON-LD encontrado: YES
+Claude usado: false
+
+Datos extraídos:
+{
+  "empresa": "Empresa X",
+  "puesto": "Python Developer",
+  "requisitos": "...",
+  "modalidad": "remoto",
+  "tipo": "junior"
+}
+```
+
+### 3. Test manual con cURL
+
+```bash
+curl -X POST "https://xxxxx.supabase.co/functions/v1/test-scraping" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://www.computrabajo.com.ar/busquedas/python",
+    "verbose": false
+  }' | jq .
+```
+
+**Parámetros:**
+- `url` (requerido): URL a scrapear
+- `fuente` (opcional): Forzar fuente (ej: "computrabajo")
+- `verbose` (opcional): true para ver HTML snippet
+
+**Ventajas:**
+- Automatizable (CI/CD)
+- Scripteable
+- Ninguna dependencia de frontend
+
+---
+
+## Casos de Uso a Testear
+
+### ✅ Caso 1: Computrabajo (Golden Path)
+
+```bash
+URL="https://www.computrabajo.com.ar/busquedas/python-developer"
+curl -X POST "..." -d "{\"url\": \"$URL\"}" | jq '.extraction'
+```
+
+**Esperado:**
+- `tier1` → datos de JSON-LD
+- `tier3_used` → false (no necesita Claude)
+- `timing.tier1_ms` → < 100ms
+
+---
+
+### ✅ Caso 2: Portal sin JSON-LD (Tier 2 + 3)
+
+```bash
+URL="https://algunjobsite.com/vacante-123"
+curl -X POST "..." -d "{\"url\": \"$URL\"}" | jq '.extraction'
+```
+
+**Esperado:**
+- `tier1` → null
+- `tier2` → algunos datos de meta tags
+- `tier3_used` → true (Claude rellena lo faltante)
+- `timing.tier3_ms` → 1000-3000ms (Claude es lento)
+
+---
+
+### ✅ Caso 3: Error HTTP (portal caído)
+
+```bash
+URL="https://localhost:9999/no-existe"
+curl -X POST "..." -d "{\"url\": \"$URL\"}" | jq '.error'
+```
+
+**Esperado:**
+```json
+{
+  "success": false,
+  "error": "HTTP 404: Not Found",
+  "http_status": 404
+}
+```
+
+---
+
+### ✅ Caso 4: URL Inválida
+
+```bash
+URL="not-a-url"
+curl -X POST "..." -d "{\"url\": \"$URL\"}" | jq '.error'
+```
+
+**Esperado:**
+```json
+{
+  "success": false,
+  "error": "URL inválida"
+}
+```
+
+---
+
+### ✅ Caso 5: Timeout (portal lento)
+
+```bash
+URL="https://slowsite.com/vacante"
+curl -X POST "..." -d "{\"url\": \"$URL\"}" | jq '.error'
+```
+
+**Esperado:**
+```json
+{
+  "success": false,
+  "error": "The operation was aborted"
+}
+```
+
+---
+
+## Interpretar Resultados
+
+### Timing Breakdown
+
+```json
+{
+  "timing": {
+    "fetch_ms": 800,      ← Descargar HTML
+    "tier1_ms": 15,       ← Buscar JSON-LD
+    "tier2_ms": 8,        ← Buscar meta tags
+    "tier3_ms": 2100,     ← Llamar Claude
+    "total_ms": 2923
+  }
+}
+```
+
+**Análisis:**
+- Si `tier1_ms` > 50ms → portal lento o HTML muy grande
+- Si `tier3_ms` > 5000ms → timeout potencial de Claude o error
+- Si `total_ms` > 10000ms → acercándose al timeout de la function (10s)
+
+---
+
+### Extraction Breakdown
+
+```json
+{
+  "extraction": {
+    "tier1": {
+      "puesto": "Python Developer",
+      "empresa": "Company X"
+    },
+    "tier2": null,
+    "tier3_used": false,
+    "tier3_fields": []
+  }
+}
+```
+
+**Interpretaciones:**
+
+| Scenario | Tier1 | Tier2 | Tier3 | Conclusión |
+|---|---|---|---|---|
+| ✅ Ideal | ✓ | null | false | Portal implementa JSON-LD correctamente |
+| ⚠️ Fallback | null | ✓ | ✓ | Meta tags parciales, Claude completó |
+| ⚠️ Degradado | null | null | ✓ | Solo Claude trabajó (portal complejo) |
+| ❌ Error | null | null | false | No se extrajo nada (HTML obstruido, etc) |
+
+---
+
+### Portal Bloqueado (anti-bot)
+
+Si ves esto:
+```json
+{
+  "success": true,
+  "final_data": {
+    "empresa": null,
+    "puesto": null
+  },
+  "timing": {
+    "total_ms": 200,      ← MUY rápido = probable 403/captcha
+    "tier1_ms": 0,
+    "tier2_ms": 0,
+    "tier3_ms": 1500     ← Claude intentó pero no hay datos
+  }
+}
+```
+
+**Diagnosis:**
+- El `fetch_ms` fue rápido pero retornó HTML sin datos (CAPTCHA / Cloudflare)
+- Claude no pudo extraer nada porque el HTML es generic
+- **Solución:** Agregar User-Agent headers mejor, o usar proxy
+
+---
+
+## Debugging
+
+### 1. Ver logs en Supabase
+
+```sql
+SELECT fuente, status, error_message, duration_ms
+FROM LOG_SCRAPING
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+### 2. Ver metadata detallada
+
+```sql
+SELECT 
+  fuente,
+  status,
+  metadata->>'source_json_ld' as has_json_ld,
+  metadata->>'source_claude' as claude_fields,
+  duration_ms
+FROM LOG_SCRAPING
+WHERE fuente = 'computrabajo'
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
+### 3. Identificar portales problemáticos
+
+```sql
+SELECT 
+  fuente,
+  COUNT(*) as attempts,
+  SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
+  ROUND(100.0 * SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) / COUNT(*)) as success_rate
+FROM LOG_SCRAPING
+GROUP BY fuente
+ORDER BY success_rate ASC;
+```
+
+---
+
+## Pasar a Producción
+
+Una vez que:
+
+- [ ] Computrabajo: JSON-LD extraído correctamente
+- [ ] Bumeran: Funciona con Tier 2/3
+- [ ] Getonboard: Funciona
+- [ ] Indeed: Degrada gracefully (sin crash)
+- [ ] "Otros": Claude rellena lo faltante
+- [ ] Timing: Siempre < 10s
+- [ ] Errores: Capturados sin crash
+
+### Checklist Final
+
+1. **Eliminar testing:** Remover `/test-scraping` de producción (opcional, pero más seguro)
+
+```bash
+# O simplemente no deploys la función
+supabase functions delete test-scraping
+```
+
+2. **Cambiar flujo:** Frontend usa `/scrape-job` directamente (no test)
+
+3. **Monitoreo en vivo:** Alertas si `status = 'failed'` en LOG_SCRAPING
+
+---
+
+## Performance Targets
+
+| Métrica | Target | Máximo |
+|---|---|---|
+| Fetch HTML | < 2s | 10s |
+| Tier 1+2 | < 100ms | 500ms |
+| Tier 3 (Claude) | 1-3s | 8s |
+| Total | < 5s | 10s |
+
+Si excede máximos regularmente:
+- Aumentar timeout a 15s (en Edge Function)
+- Usar caché para portales repetidos
+- O migrar a un service worker basado en Puppeteer

@@ -1,0 +1,12 @@
+{
+  "name": "PathWork",
+  "short_name": "PATHW",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#22282b",
+  "theme_color": "##219797",
+  "icons": [
+    { "src": "/icons/WORKPATH192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/WORKPATH512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
